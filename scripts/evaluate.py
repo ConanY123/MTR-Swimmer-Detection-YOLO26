@@ -29,4 +29,26 @@ for i, box in enumerate(boxes):
     print(f" Box:    {[round(x,4) for x in xywh]}")
     print("-" * 35)
 
+"""
+Loading the Ground Truth Labels (answer key)
+"""
+# Answer key path
+label_path = "dataset/labels/swimmer_eval_001.txt"
+# Empty list
+gt_boxes = []
 
+# Populating the ground truth boxes list
+with open(label_path, "r") as f:
+    for line in f:
+        parts = line.strip().split()
+        if parts:
+            # parts[0] is the class ID (0)
+            # parts[1:5] are [center_x, center_y, width, height]
+            box = [float(x) for x in parts[1:5]]
+
+# gt_boxes is now a list of lists containing 4 coordinates
+print(f"\nGround Truth Swimmers: {len(gt_boxes)}")
+for i, g in enumerate(gt_boxes):
+    print(f" GT #{i+1} Box: {[round(x,4) for x in g]}")
+
+    
