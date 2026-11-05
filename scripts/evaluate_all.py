@@ -2,15 +2,16 @@ import os
 import csv
 from ultralytics import YOLO
 
-# 1. Load the YOLO model
-model = YOLO("yolo26n.pt")
-
-# 2. Paths
+# 1. Paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATASET_DIR = os.path.join(BASE_DIR, "dataset")
 IMAGES_DIR = os.path.join(DATASET_DIR, "images")
 LABELS_DIR = os.path.join(DATASET_DIR, "labels")
-SOURCES_CSV = os.path.join(DATASET_DIR, "sources.csv")
+RESULTS_DIR = os.path.join(DATASET_DIR, "eval_results")
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+# 2. Load the YOLO model (found next to this repo, whatever folder you run from)
+model = YOLO(os.path.join(BASE_DIR, "yolo26n.pt"))
 
 # 3. IoU Function
 def compute_iou(box1, box2):
@@ -32,17 +33,21 @@ def compute_iou(box1, box2):
 
 # 4. Evaluation Function for any confidence threshold
 def evaluate_dataset(conf_threshold):
-    with open(SOURCES_CSV, "r", encoding="utf-8") as f:
-        rows = list(csv.DictReader(f))
+    # Evaluate every image in dataset/images (not just the ones in sources.csv),
+    # so images imported from Roboflow are included too.
+    image_files = sorted(
+        f for f in os.listdir(IMAGES_DIR)
+        if os.path.splitext(f)[1].lower() in IMAGE_EXTS
+    )
 
     total_tp = 0
     total_fp = 0
     total_fn = 0
     total_gt = 0
+    per_image = []
 
-    for row in rows:
-        img_id = row["image_id"]
-        fname = row["filename"]
+    for fname in image_files:
+        img_id = os.path.splitext(fname)[0]
         img_path = os.path.join(IMAGES_DIR, fname)
         lbl_path = os.path.join(LABELS_DIR, f"{img_id}.txt")
 
@@ -93,25 +98,45 @@ def evaluate_dataset(conf_threshold):
         total_tp += img_tp
         total_fp += img_fp
         total_fn += img_fn
+        per_image.append({
+            "image": fname,
+            "source": "roboflow" if img_id.startswith("rf_") else "conan_open_water",
+            "real_swimmers": len(gt_boxes),
+            "caught_tp": img_tp,
+            "missed_fn": img_fn,
+            "false_alarms_fp": img_fp,
+        })
+
+    # Save a per-image breakdown, so we can see which images the misses
+    # and false alarms come from
+    if not per_image:
+        raise SystemExit(f"No images found in {IMAGES_DIR}")
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    out_csv = os.path.join(RESULTS_DIR, f"per_image_conf_{conf_threshold:.2f}.csv")
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(per_image[0].keys()))
+        writer.writeheader()
+        writer.writerows(per_image)
 
     # Calculate final percentage scores
     precision = (total_tp / (total_tp + total_fp) * 100) if (total_tp + total_fp) > 0 else 0.0
     recall = (total_tp / total_gt * 100) if total_gt > 0 else 0.0
 
-    return total_gt, total_tp, total_fp, total_fn, precision, recall
+    return total_gt, total_tp, total_fp, total_fn, precision, recall, len(image_files), out_csv
 
 
 # 5. Run the evaluation!
 print("=" * 60)
-print("  EVALUATING YOLO26n ACROSS FULL 24-IMAGE BENCHMARK")
+print("  EVALUATING YOLO26n ON ALL IMAGES IN dataset/images")
 print("=" * 60)
 
 for conf in [0.25, 0.15]:
-    gt, tp, fp, fn, prec, rec = evaluate_dataset(conf)
-    print(f"\nConfidence Threshold: {conf:.2f}")
+    gt, tp, fp, fn, prec, rec, n_images, out_csv = evaluate_dataset(conf)
+    print(f"\nConfidence Threshold: {conf:.2f}  ({n_images} images)")
     print(f"  Total Real Swimmers:  {gt}")
     print(f"  Swimmers Caught (TP): {tp}")
     print(f"  Swimmers Missed (FN): {fn}")
     print(f"  False Alarms    (FP): {fp}")
     print(f"  --> RECALL:           {rec:.1f}%")
     print(f"  --> PRECISION:        {prec:.1f}%")
+    print(f"  Per-image breakdown:  {out_csv}")
