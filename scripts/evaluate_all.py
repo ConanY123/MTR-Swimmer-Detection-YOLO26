@@ -1,5 +1,6 @@
 import os
 import csv
+import argparse
 from ultralytics import YOLO
 
 # 1. Paths
@@ -10,8 +11,16 @@ LABELS_DIR = os.path.join(DATASET_DIR, "labels")
 RESULTS_DIR = os.path.join(DATASET_DIR, "eval_results")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
-# 2. Load the YOLO model (found next to this repo, whatever folder you run from)
-model = YOLO(os.path.join(BASE_DIR, "yolo26n.pt"))
+# 2. Load the YOLO model (found next to this repo, whatever folder you run from).
+#    Pass --model to test a different one, e.g. the fine-tuned swimmer model:
+#    python scripts/evaluate_all.py --model models/yolo26n_swimmer.pt
+parser = argparse.ArgumentParser()
+parser.add_argument("--model", default=os.path.join(BASE_DIR, "yolo26n.pt"))
+args = parser.parse_args()
+model = YOLO(args.model)
+MODEL_NAME = os.path.splitext(os.path.basename(args.model))[0]
+# Results for the default model keep their old file names; other models get their own
+CSV_TAG = "" if MODEL_NAME == "yolo26n" else f"{MODEL_NAME}_"
 
 # 3. IoU Function
 def compute_iou(box1, box2):
@@ -112,7 +121,7 @@ def evaluate_dataset(conf_threshold):
     if not per_image:
         raise SystemExit(f"No images found in {IMAGES_DIR}")
     os.makedirs(RESULTS_DIR, exist_ok=True)
-    out_csv = os.path.join(RESULTS_DIR, f"per_image_conf_{conf_threshold:.2f}.csv")
+    out_csv = os.path.join(RESULTS_DIR, f"per_image_{CSV_TAG}conf_{conf_threshold:.2f}.csv")
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(per_image[0].keys()))
         writer.writeheader()
@@ -127,7 +136,7 @@ def evaluate_dataset(conf_threshold):
 
 # 5. Run the evaluation!
 print("=" * 60)
-print("  EVALUATING YOLO26n ON ALL IMAGES IN dataset/images")
+print(f"  EVALUATING {MODEL_NAME} ON ALL IMAGES IN dataset/images")
 print("=" * 60)
 
 for conf in [0.25, 0.15]:
