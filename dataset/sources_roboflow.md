@@ -10,7 +10,7 @@ All three are licensed **CC BY 4.0**, which allows reuse with credit.
 | drowning detection | Yuki | 15 | Wave pool from a lifeguard-tower angle, plus open water and lake shots | https://universe.roboflow.com/yuki-68xu7/drowning-detection-e6kbk-lxylk |
 | water-rescue-dataset | CuiZH | 195 | Mostly people in open water and at sea, some pools, a few empty-water scenes | https://universe.roboflow.com/cuizh/water-rescue-dataset |
 
-**Total: 270 images, 892 swimmer boxes** (relabelled Nov 10, 2026; see below).
+**Total: 270 images, 720 swimmer boxes** (relabelled Nov 10, cleaned Nov 11, 2026; see below).
 
 ## Relabelling (Nov 10, 2026)
 
@@ -32,6 +32,20 @@ All 270 images were relabelled:
 - Result: 892 swimmer boxes; 9 images have no people in the water.
 
 Roboflow project: "Swimmer eval relabel", version 1.
+
+## Cleanup (Nov 11, 2026)
+
+The auto-labeller sometimes split one person into several boxes (a hand, a
+head, splashes), boxed the same person twice, or boxed people standing on
+the pool deck. A sanity check showed these were counted as "missed
+swimmers". Cleanup (892 -> 720 boxes, 57 files):
+
+- Removed exact duplicate boxes.
+- Removed fragment boxes that sit mostly inside a bigger box for the same
+  person, and tiny specks touching a person's box (not applied to the
+  crowded wave-pool frames, where people genuinely overlap).
+- Fixed 14 images by hand: merged split hand/head boxes into one box per
+  person and removed people standing out of the water.
 
 ## Earlier changes to the original labels
 
