@@ -7,8 +7,9 @@ training images come from two public Roboflow Universe datasets (CC BY 4.0)
 that were NOT used for the eval set:
 
   * TinyPerson (Chris D), version 3: far-away people at sea and on beaches.
-    Only people in the water are kept; people on the beach are dropped,
-    the same rule as the eval set. These photos are large and the people
+    Only people in the water are boxed (the same rule as the eval set).
+    People on the beach are painted over, so the model is neither taught
+    to box them nor taught that they're background. These photos are large and the people
     are tiny, so each photo is cut into a 2x2 grid of tiles. That makes
     the people twice as big relative to the image, closer to what a boat
     camera would see.
@@ -34,7 +35,7 @@ import sys
 from pathlib import Path
 
 import yaml
-from PIL import Image
+from PIL import Image, ImageDraw
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 EVAL_IMAGES = BASE_DIR / "dataset" / "images"
@@ -118,9 +119,20 @@ def process_tiny(root, emit):
     keep = water_class_ids(names)
     print(f"  TinyPerson classes {names} -> keeping {[names[i] for i in keep]}")
     for img_path, lbl, split in find_pairs(root):
-        boxes = [b[1:] for b in read_labels(lbl) if b[0] in keep]
+        rows = read_labels(lbl)
+        boxes = [b[1:] for b in rows if b[0] in keep]
         im = Image.open(img_path).convert("RGB")
         W, H = im.size
+        # People on the beach aren't swimmers, but they ARE people. Leaving them
+        # unboxed taught the first model that ordinary-looking people are
+        # background, so paint over them instead: they're neither right nor wrong.
+        fill = tuple(int(v) for v in im.resize((1, 1), Image.BOX).getpixel((0, 0)))
+        draw = ImageDraw.Draw(im)
+        for b in rows:
+            if b[0] not in keep:
+                cx, cy, w, h = b[1:]
+                w, h = w * 1.3, h * 1.3  # a little margin around the person
+                draw.rectangle([(cx - w / 2) * W, (cy - h / 2) * H, (cx + w / 2) * W, (cy + h / 2) * H], fill=fill)
         for ty in range(2):
             for tx in range(2):
                 x0, y0 = tx * 0.5, ty * 0.5
