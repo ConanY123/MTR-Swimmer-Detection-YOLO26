@@ -16,8 +16,9 @@ misses mostly small, far-away swimmers and swimmers lying flat in the water.
 
 ## What the build script changes
 
-- **TinyPerson:** only people in the water are kept (people on the beach are
-  dropped, same rule as the eval set). Each photo is cut into 4 tiles so the
+- **TinyPerson:** only people in the water are boxed (same rule as the eval
+  set). People on the beach are painted over with the photo's average
+  colour, so the model isn't taught that they're background (version 2). Each photo is cut into 4 tiles so the
   tiny people are bigger relative to the image. About 80% of tiles with
   nobody in the water are skipped.
 - **Swimmer detection 2:** every 3rd image is kept (neighbouring video frames
@@ -35,3 +36,19 @@ misses mostly small, far-away swimmers and swimmers lying flat in the water.
 - No close-up drowning photos are in the training set, so the fine-tuned
   model should be checked on large, close swimmers too (the eval set's
   "large" group), not only on small ones.
+
+## Results
+
+| Model | Recall (conf 0.25) | Precision | Notes |
+|---|---|---|---|
+| yolo26n.pt (normal) | 23.8% | 72.6% | |
+| yolo26n_swimmer (v1, Nov 18) | 4.9% | 52.9% | Much worse. Results in `eval_results/per_image_yolo26n_swimmer_conf_*.csv` |
+
+Version 1 did well on its own validation images (precision 0.89, recall
+0.82) but forgot large, close people: it found 0 of the 14 people in the
+open-water photos (the normal model finds 13). Two likely causes: the
+training set has almost no medium or large people, and TinyPerson's beach
+people were left unboxed, teaching the model that ordinary-looking people
+are background. Version 2 paints over the beach people, keeps all 80 COCO
+classes so the original person detector is kept, locks the first 10 layers
+and uses a lower learning rate (`scripts/train_swimmer.py`).
