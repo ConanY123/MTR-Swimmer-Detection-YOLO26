@@ -11,6 +11,10 @@ trade-off for each model, so we can pick a threshold and compare models.
 Usage (from the repo root):
     python scripts/pr_vs_conf.py                                   # normal yolo26n
     python scripts/pr_vs_conf.py --models yolo26n.pt models/yolo26n_swimmer_v2.pt
+    python scripts/pr_vs_conf.py --models yolo26n.pt yolo26s.pt yolo26m.pt   # bigger models
+A model name that isn't on disk (yolo26s.pt, yolo26m.pt, ...) is downloaded by
+Ultralytics the first time. It also prints how long each model takes per image
+on this computer, to compare speeds (the Orange Pi will be slower).
 
 Saves to dataset/eval_results/:
     pr_vs_conf.png   the chart (recall and precision vs confidence, one line per model)
@@ -22,6 +26,7 @@ import argparse
 import csv
 import os
 import sys
+import time
 
 import matplotlib
 matplotlib.use("Agg")
@@ -40,13 +45,17 @@ IOU_THR = 0.5
 
 
 def run_model(path, files):
-    """Runs the model once at a very low threshold; returns {stem: [(conf, box), ...]}."""
+    """Runs the model once at a very low threshold.
+    Returns ({stem: [(conf, box), ...]}, average milliseconds per image on this machine)."""
     model = YOLO(path)
     preds = {}
+    model.predict(os.path.join(IMAGES_DIR, files[0]), conf=0.01, classes=[0], verbose=False)  # warm-up, not timed
+    t0 = time.perf_counter()
     for f in files:
         r = model.predict(os.path.join(IMAGES_DIR, f), conf=0.01, classes=[0], verbose=False)[0]
         preds[os.path.splitext(f)[0]] = [(float(b.conf[0]), tuple(b.xywhn[0].tolist())) for b in r.boxes]
-    return preds
+    ms = (time.perf_counter() - t0) / len(files) * 1000
+    return preds, ms
 
 
 def scores(preds, gts, thr):
@@ -78,9 +87,9 @@ def main():
     rows, curves = [], {}
     for m in args.models:
         name = os.path.splitext(os.path.basename(m))[0]
-        preds = run_model(m, files)
+        preds, ms = run_model(m, files)
         rec, prec = [], []
-        print(f"\n{name}")
+        print(f"\n{name}   ({ms:.0f} ms per image on this computer, including reading the image)")
         print(f"  {'conf':>5} {'caught':>7} {'missed':>7} {'false':>6} {'recall':>7} {'precis.':>8} {'F1':>6}"
               f"   recall by size: tiny / small / medium / large")
         for t in THRESHOLDS:
@@ -93,7 +102,7 @@ def main():
                    "missed_fn": n_gt - tp, "false_alarms_fp": fp,
                    "recall_pct": round(r * 100, 1),
                    "precision_pct": "" if p != p else round(p * 100, 1),
-                   "f1_pct": round(f1 * 100, 1)}
+                   "f1_pct": round(f1 * 100, 1), "ms_per_image": round(ms)}
             for k, v in size_pct.items():
                 row["recall_" + k.split()[0] + "_pct"] = "" if v != v else round(v, 1)
             rows.append(row)

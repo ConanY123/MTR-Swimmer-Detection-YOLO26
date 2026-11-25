@@ -2,3 +2,8 @@ train_data/
 train_data_download/
 runs/
 __pycache__/
+# Bigger YOLO26 models are downloaded by Ultralytics, not stored here
+yolo26s.pt
+yolo26m.pt
+yolo26l.pt
+yolo26x.pt
