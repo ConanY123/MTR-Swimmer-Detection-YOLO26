@@ -11,6 +11,10 @@ trade-off for each model, so we can pick a threshold and compare models.
 Usage (from the repo root):
     python scripts/pr_vs_conf.py                                   # normal yolo26n
     python scripts/pr_vs_conf.py --models yolo26n.pt models/yolo26n_swimmer_v2.pt
+    python scripts/pr_vs_conf.py --models yolo26n.pt yolo26s.pt yolo26m.pt   # bigger models
+A model name that isn't on disk (yolo26s.pt, yolo26m.pt, ...) is downloaded by
+Ultralytics the first time. It also prints how long each model takes per image
+on this computer, to compare speeds (the Orange Pi will be slower).
 
 Saves to dataset/eval_results/:
     pr_vs_conf.png   the chart (recall and precision vs confidence, one line per model)
@@ -22,6 +26,7 @@ import argparse
 import csv
 import os
 import sys
+import time
 
 import matplotlib
 matplotlib.use("Agg")
@@ -40,13 +45,17 @@ IOU_THR = 0.5
 
 
 def run_model(path, files):
-    """Runs the model once at a very low threshold; returns {stem: [(conf, box), ...]}."""
+    """Runs the model once at a very low threshold.
+    Returns ({stem: [(conf, box), ...]}, average milliseconds per image on this machine)."""
     model = YOLO(path)
     preds = {}
+    model.predict(os.path.join(IMAGES_DIR, files[0]), conf=0.01, classes=[0], verbose=False)  # warm-up, not timed
+    t0 = time.perf_counter()
     for f in files:
         r = model.predict(os.path.join(IMAGES_DIR, f), conf=0.01, classes=[0], verbose=False)[0]
         preds[os.path.splitext(f)[0]] = [(float(b.conf[0]), tuple(b.xywhn[0].tolist())) for b in r.boxes]
-    return preds
+    ms = (time.perf_counter() - t0) / len(files) * 1000
+    return preds, ms
 
 
 def scores(preds, gts, thr):
@@ -63,7 +72,7 @@ def scores(preds, gts, thr):
             by_size[size_bin(box)][0] += i in found
     recall = tp / n_gt if n_gt else 0.0
     precision = tp / (tp + fp) if tp + fp else float("nan")  # no boxes at all: leave a gap
-    return recall, precision, by_size
+    return recall, precision, by_size, (tp, fp, n_gt)
 
 
 def main():
@@ -78,16 +87,30 @@ def main():
     rows, curves = [], {}
     for m in args.models:
         name = os.path.splitext(os.path.basename(m))[0]
-        preds = run_model(m, files)
+        preds, ms = run_model(m, files)
         rec, prec = [], []
+        print(f"\n{name}   ({ms:.0f} ms per image on this computer, including reading the image)")
+        print(f"  {'conf':>5} {'caught':>7} {'missed':>7} {'false':>6} {'recall':>7} {'precis.':>8} {'F1':>6}"
+              f"   recall by size: tiny / small / medium / large")
         for t in THRESHOLDS:
-            r, p, _ = scores(preds, gts, t)
+            r, p, by_size, (tp, fp, n_gt) = scores(preds, gts, t)
+            f1 = 2 * p * r / (p + r) if p == p and p + r else 0.0
             rec.append(r * 100)
             prec.append(p * 100)
-            rows.append({"model": name, "confidence": t, "recall_pct": round(r * 100, 1),
-                         "precision_pct": "" if p != p else round(p * 100, 1)})
+            size_pct = {k: (100 * f / n if n else float("nan")) for k, (f, n) in by_size.items()}
+            row = {"model": name, "confidence": t, "swimmers": n_gt, "caught_tp": tp,
+                   "missed_fn": n_gt - tp, "false_alarms_fp": fp,
+                   "recall_pct": round(r * 100, 1),
+                   "precision_pct": "" if p != p else round(p * 100, 1),
+                   "f1_pct": round(f1 * 100, 1), "ms_per_image": round(ms)}
+            for k, v in size_pct.items():
+                row["recall_" + k.split()[0] + "_pct"] = "" if v != v else round(v, 1)
+            rows.append(row)
+            prec_txt = "    -  " if p != p else f"{p * 100:7.1f}%"
+            sizes_txt = " / ".join("-" if v != v else f"{v:.0f}%" for v in size_pct.values())
+            print(f"  {t:5.2f} {tp:7d} {n_gt - tp:7d} {fp:6d} {r * 100:6.1f}% {prec_txt} {f1 * 100:5.1f}%   {sizes_txt}")
         curves[name] = (rec, prec)
-        _, _, by_size = scores(preds, gts, 0.25)
+        _, _, by_size, _ = scores(preds, gts, 0.25)
         sizes = "   ".join(f"{k}: {f}/{n} ({100 * f / n:.0f}%)" if n else f"{k}: -"
                            for k, (f, n) in by_size.items())
         print(f"{name}  recall by swimmer size at conf 0.25 ->  {sizes}")
