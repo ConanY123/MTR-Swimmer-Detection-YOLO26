@@ -63,7 +63,7 @@ def scores(preds, gts, thr):
             by_size[size_bin(box)][0] += i in found
     recall = tp / n_gt if n_gt else 0.0
     precision = tp / (tp + fp) if tp + fp else float("nan")  # no boxes at all: leave a gap
-    return recall, precision, by_size
+    return recall, precision, by_size, (tp, fp, n_gt)
 
 
 def main():
@@ -80,14 +80,28 @@ def main():
         name = os.path.splitext(os.path.basename(m))[0]
         preds = run_model(m, files)
         rec, prec = [], []
+        print(f"\n{name}")
+        print(f"  {'conf':>5} {'caught':>7} {'missed':>7} {'false':>6} {'recall':>7} {'precis.':>8} {'F1':>6}"
+              f"   recall by size: tiny / small / medium / large")
         for t in THRESHOLDS:
-            r, p, _ = scores(preds, gts, t)
+            r, p, by_size, (tp, fp, n_gt) = scores(preds, gts, t)
+            f1 = 2 * p * r / (p + r) if p == p and p + r else 0.0
             rec.append(r * 100)
             prec.append(p * 100)
-            rows.append({"model": name, "confidence": t, "recall_pct": round(r * 100, 1),
-                         "precision_pct": "" if p != p else round(p * 100, 1)})
+            size_pct = {k: (100 * f / n if n else float("nan")) for k, (f, n) in by_size.items()}
+            row = {"model": name, "confidence": t, "swimmers": n_gt, "caught_tp": tp,
+                   "missed_fn": n_gt - tp, "false_alarms_fp": fp,
+                   "recall_pct": round(r * 100, 1),
+                   "precision_pct": "" if p != p else round(p * 100, 1),
+                   "f1_pct": round(f1 * 100, 1)}
+            for k, v in size_pct.items():
+                row["recall_" + k.split()[0] + "_pct"] = "" if v != v else round(v, 1)
+            rows.append(row)
+            prec_txt = "    -  " if p != p else f"{p * 100:7.1f}%"
+            sizes_txt = " / ".join("-" if v != v else f"{v:.0f}%" for v in size_pct.values())
+            print(f"  {t:5.2f} {tp:7d} {n_gt - tp:7d} {fp:6d} {r * 100:6.1f}% {prec_txt} {f1 * 100:5.1f}%   {sizes_txt}")
         curves[name] = (rec, prec)
-        _, _, by_size = scores(preds, gts, 0.25)
+        _, _, by_size, _ = scores(preds, gts, 0.25)
         sizes = "   ".join(f"{k}: {f}/{n} ({100 * f / n:.0f}%)" if n else f"{k}: -"
                            for k, (f, n) in by_size.items())
         print(f"{name}  recall by swimmer size at conf 0.25 ->  {sizes}")

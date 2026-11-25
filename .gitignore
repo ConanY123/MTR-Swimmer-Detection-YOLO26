@@ -1,3 +1,4 @@
 train_data/
 train_data_download/
 runs/
+__pycache__/
